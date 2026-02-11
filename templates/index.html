@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="autocomplete" content="off">
+    <title>Memory Game Web</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #2c3e50; color: white; text-align: center; }
+        .hidden { display: none !important; }
+        .container { background: #34495e; padding: 25px; border-radius: 10px; display: inline-block; margin-top: 50px; }
+
+        /* הגנה מפני מילוי אוטומטי של הדפדפן */
+        input { padding: 10px; margin: 10px; border-radius: 5px; border: 1px solid #ccc; width: 200px; }
+
+        .btn { padding: 15px 30px; font-size: 18px; margin: 10px; cursor: pointer; border: none; border-radius: 5px; color: white; font-weight: bold; }
+        .blue { background: #3498db; } .orange { background: #e67e22; } .yellow { background: #f1c40f; color: black; }
+
+        #status-bar { font-size: 24px; background: #1a252f; padding: 15px; border-bottom: 2px solid #3498db; width: 100%; }
+        #board { display: grid; gap: 10px; justify-content: center; margin: 20px auto; padding: 10px; }
+
+        .card { width: 100px; height: 100px; background: #34495e; cursor: pointer; border-radius: 8px; display: flex; align-items: center; justify-content: center; border: 2px solid #2c3e50; position: relative; }
+        .card img { width: 100%; height: 100%; border-radius: 6px; display: none; object-fit: cover; }
+        .card.flipped img { display: block; }
+        .card.flipped { background: white; cursor: default; }
+        /* תמונות שנמצאו נשארות גלויות (ללא שינוי ב-visibility) */
+        .card.matched { border: 3px solid #27ae60; cursor: default; }
+    </style>
+</head>
+<body>
+
+    <div id="status-bar" class="hidden"></div>
+
+   <div id="login-screen">
+    <h1>משחק הזיכרון</h1>
+    <div class="container">
+        <!-- שדות מזויפים נסתרים – מונעים מהדפדפן להציע סיסמאות -->
+        <div style="position: absolute; left: -9999px; top: -9999px;">
+            <input type="text" autocomplete="username">
+            <input type="password" autocomplete="current-password">
+        </div>
+
+        <div style="display: flex; gap: 20px; justify-content: center;">
+            <div>
+                <h3>שחקן 1</h3>
+                <!-- שמות שדות לא סטנדרטיים + autocomplete=off -->
+                <input type="text" id="p1-name" name="auth_user_code_1" placeholder="שם משתמש" autocomplete="off">
+                <br>
+                <!-- שימוש ב-type="text" במקום password – מונע הצעות סיסמה -->
+                <input type="text" id="p1-pass" name="auth_secret_code_1" placeholder="סיסמה / קוד" autocomplete="off">
+            </div>
+            <div id="p2-area" class="hidden">
+                <h3>שחקן 2</h3>
+                <input type="text" id="p2-name" name="auth_user_code_2" placeholder="שם שחקן 2" autocomplete="off">
+                <br>
+                <input type="text" id="p2-pass" name="auth_secret_code_2" placeholder="סיסמה / קוד" autocomplete="off">
+            </div>
+        </div>
+        <br>
+        <button class="btn blue" onclick="handleAuth()">כניסה למשחק</button>
+        <button class="btn orange" onclick="toggleMulti()">הוסף/הסר שחקן 2</button>
+        <br>
+        <button class="btn yellow" onclick="loadLeaderboard()">🏆 לוח הישגים</button>
+    </div>
+</div>
+
+    <div id="difficulty-screen" class="hidden">
+        <h2>בחר רמת קושי</h2>
+        <button class="btn blue" onclick="initGame(4,4)">קל (4x4)</button>
+        <button class="btn orange" onclick="initGame(6,6)">בינוני (6x6)</button>
+        <button class="btn blue" style="background:#8e44ad" onclick="initGame(8,8)">קשה (8x8)</button>
+    </div>
+
+    <div id="game-screen" class="hidden">
+        <div id="board"></div>
+        <button class="btn orange" onclick="location.reload()" style="margin-top:20px;">חזרה לתפריט</button>
+    </div>
+
+    <script>
+        let game = {
+            mode: 'Single', p1: null, p2: null,
+            flipped: [], turns: 0, matches: 0,
+            currentPlayer: 1, scores: {1:0, 2:0},
+            startTime: null, timerInterval: null
+        };
+
+        function toggleMulti() {
+            const area = document.getElementById('p2-area');
+            area.classList.toggle('hidden');
+            game.mode = area.classList.contains('hidden') ? 'Single' : 'Multi';
+        }
+
+        async function handleAuth() {
+            // אימות שחקן 1
+            const u1 = await verify(document.getElementById('p1-name').value, document.getElementById('p1-pass').value);
+            if (!u1) return alert("שחקן 1: שם או סיסמה שגויים");
+            game.p1 = { name: document.getElementById('p1-name').value, best: u1.user.best_score };
+
+            // אימות שחקן 2
+            if (game.mode === 'Multi') {
+                const u2 = await verify(document.getElementById('p2-name').value, document.getElementById('p2-pass').value);
+                if (!u2) return alert("שחקן 2: שם או סיסמה שגויים");
+                game.p2 = { name: document.getElementById('p2-name').value };
+            }
+
+            document.getElementById('login-screen').classList.add('hidden');
+            document.getElementById('difficulty-screen').classList.remove('hidden');
+        }
+
+        async function verify(name, pass) {
+    if (!name || !pass) {
+        alert("נא למלא שם וסיסמה");
+        return null;
+    }
+
+    const res = await fetch('/login', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, password: pass })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        alert(data.message || "שגיאה בהתחברות");
+        return null;
+    }
+
+    if (data.status === "registered") {
+        alert("נרשמת בהצלחה!");
+    }
+
+    return data;
+}
+
+
+        async function initGame(r, c) {
+            game.rows = r; game.cols = c;
+            game.turns = 0; game.matches = 0;
+            game.startTime = Date.now();
+
+            const data = await (await fetch('/get_game_data')).json();
+
+            const board = document.getElementById('board');
+            const size = r === 8 ? 70 : 100;
+            board.style.gridTemplateColumns = `repeat(${c}, ${size}px)`;
+
+            let numPairs = (r * c) / 2;
+            let deck = [...data.images.slice(0, numPairs), ...data.images.slice(0, numPairs)].sort(() => 0.5 - Math.random());
+
+            board.innerHTML = '';
+            deck.forEach(img => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.width = size + 'px'; card.style.height = size + 'px';
+                card.innerHTML = `<img src="/static/game_images/${img}">`;
+                card.onclick = () => {
+                    if (game.flipped.length < 2 && !card.classList.contains('flipped')) {
+                        card.classList.add('flipped');
+                        game.flipped.push({el: card, img: img});
+                        if (game.flipped.length === 2) {
+                            game.turns++;
+                            setTimeout(check, 1000);
+                        }
+                        update();
+                    }
+                };
+                board.appendChild(card);
+            });
+
+            document.getElementById('difficulty-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            document.getElementById('status-bar').classList.remove('hidden');
+            game.timerInterval = setInterval(update, 1000);
+            update();
+        }
+
+        async function check() {
+    const [c1, c2] = game.flipped;
+    if (c1.img === c2.img) {
+        game.matches++;
+        if(game.mode === 'Multi') game.scores[game.currentPlayer]++;
+        c1.el.classList.add('matched');
+        c2.el.classList.add('matched');
+
+        // בדיקה אם המשחק נגמר
+        if (game.matches === (game.rows * game.cols) / 2) {
+            clearInterval(game.timerInterval);
+
+            // הכנת הנתונים לשליחה
+            const stats = {
+                name: game.p1.name,
+                // שומרים את מספר התורות רק במצב שחקן יחיד
+                score: game.mode === 'Single' ? game.turns : null,
+                // בודקים אם שחקן 1 ניצח במצב מרובה משתתפים
+                win: game.mode === 'Multi' && game.scores[1] > game.scores[2]
+            };
+
+            // שליחה לשרת (Python)
+            try {
+                await fetch('/update_stats', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(stats)
+                });
+            } catch (e) {
+                console.error("שגיאה בשמירת הנתונים:", e);
+            }
+
+            // הודעת סיום למשתמש
+            const sec = Math.floor((Date.now() - game.startTime) / 1000);
+            alert(`כל הכבוד! סיימתם את המשחק.\nניסיונות: ${game.turns}\nזמן: ${sec} שניות`);
+        }
+    } else {
+        c1.el.classList.remove('flipped');
+        c2.el.classList.remove('flipped');
+        if(game.mode === 'Multi') game.currentPlayer = game.currentPlayer === 1 ? 2 : 1;
+    }
+    game.flipped = [];
+    update();
+}
+
+        function update() {
+            const sec = Math.floor((Date.now() - game.startTime) / 1000);
+            const bar = document.getElementById('status-bar');
+            if (game.mode === 'Single') {
+                bar.innerHTML = `שחקן: ${game.p1.name} | ניסיונות: ${game.turns} | זמן: ${sec} ש'`;
+            } else {
+                let name = game.currentPlayer === 1 ? game.p1.name : game.p2.name;
+                bar.innerHTML = `${game.p1.name}: ${game.scores[1]} | תור: ${name} | ${game.p2.name}: ${game.scores[2]} | זמן: ${sec}`;
+            }
+        }
+
+        async function loadLeaderboard() {
+            const res = await fetch('/get_game_data');
+            const data = await res.json();
+
+            let s = "🏆 לוח הישגים:\n\n";
+            const sorted = Object.entries(data.leaderboard)
+                .sort(([,a], [,b]) => a.best_score - b.best_score); // נמוך = טוב
+
+            sorted.forEach(([name, stats]) => {
+                s += `${name}: ${stats.best_score} תורות | ${stats.wins || 0} ניצחונות\n`;
+            });
+
+            alert(s || "אין עדיין שיאים");
+        }
+    </script>
+</body>
+</html>
