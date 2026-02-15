@@ -1,25 +1,58 @@
 from flask import Flask, render_template, request, jsonify
 import json
-import random
-import os
 from pathlib import Path
 
 app = Flask(__name__)
-
-DATA_FILE = Path("memory_game_users.json")
+DATA_FILE = Path('memory_game_users.json')
 IMAGE_FOLDER = Path("static/game_images")
+
+
+def get_image_list():
+    """Get all images from the game_images directory"""
+    if IMAGE_FOLDER.exists() and IMAGE_FOLDER.is_dir():
+        images = [f.name for f in IMAGE_FOLDER.iterdir()
+                  if f.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}]
+        print(f"[IMAGES] Found {len(images)} images in {IMAGE_FOLDER}")
+        return sorted(images)
+    else:
+        print(f"[WARNING] Images directory not found: {IMAGE_FOLDER}")
+        return []
 
 
 def load_data():
     if DATA_FILE.exists():
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
+        try:
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # Convert old format to new format
+            if 'users' not in data:
+                print("[MIGRATION] Converting old data format to new format...")
+                old_users = {k: v for k, v in data.items() if k != 'images'}
+                images = get_image_list()
+
+                data = {
+                    "users": old_users,
+                    "images": images
+                }
+                save_data(data)
+                print("[MIGRATION] Data migration complete!")
+
+            # Always refresh images list
+            data['images'] = get_image_list()
+
+            return data
+        except json.JSONDecodeError:
+            print("[ERROR] Corrupted JSON file. Creating new one.")
+            return {"users": {}, "images": get_image_list()}
+
+    print("[INIT] Creating new data file...")
+    return {"users": {}, "images": get_image_list()}
 
 
 def save_data(data):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    with open(DATA_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
 
 @app.route('/')
@@ -27,88 +60,115 @@ def index():
     return render_template('index.html')
 
 
-@app.route("/login", methods=["POST"])
+@app.route('/login', methods=['POST'])
 def login():
-    data = request.json
-    name = data.get("name")
-    password = data.get("password")
+    data = load_data()
+    req = request.get_json()
+    name = req.get('name')
+    password = req.get('password')
 
-    if not name or not password:
-        return jsonify({"message": "חסרים שם או סיסמה"}), 400
-
-    users = load_data()
-
-    if name in users:
-        if users[name]["password"] == password:
-            return jsonify({
-                "status": "ok",
-                "user": {
-                    "name": name,
-                    "best_scores": users[name].get("best_scores", {"4x4": 999, "6x6": 999, "8x8": 999})
-                }
-            })
+    if name in data['users']:
+        if data['users'][name]['password'] == password:
+            return jsonify({"message": "Login successful", "user": data['users'][name]}), 200
         else:
-            return jsonify({"message": "סיסמה שגויה"}), 401
+            return jsonify({"message": "Wrong password"}), 401
     else:
-        # הרשמה
-        users[name] = {
+        # Create new user
+        data['users'][name] = {
             "password": password,
-            "best_scores": {"4x4": 999, "6x6": 999, "8x8": 999}, # שיאים נפרדים
-            "wins": 0
+            "wins": 0,
+            "best_scores": {
+                "4x4": None,
+                "6x6": None,
+                "8x8": None
+            }
         }
-        save_data(users)
-        return jsonify({
-            "status": "registered",
-            "user": {"name": name}
-        })
-
-
-@app.route('/get_game_data')
-def get_game_data():
-    images = [f.name for f in IMAGE_FOLDER.iterdir() if f.suffix.lower() in ('.png', '.jpg', '.jpeg')]
-    users = load_data()
-
-    leaderboard = {}
-    for name, info in users.items():
-        # אנחנו שולחים את כל המילון כפי שהוא
-        leaderboard[name] = {
-            "best_scores": info.get("best_scores", {"4x4": 999, "6x6": 999, "8x8": 999}),
-            "wins": info.get("wins", 0)
-        }
-
-    return jsonify({
-        "images": images,
-        "leaderboard": leaderboard
-    })
+        save_data(data)
+        return jsonify({"message": "User created", "user": data['users'][name]}), 200
 
 
 @app.route('/update_stats', methods=['POST'])
 def update_stats():
-    data = request.json
-    users = load_data()
-    name = data.get('name')
-    difficulty = data.get('difficulty')  # ה-JS ישלח למשל "4x4"
-    score = data.get('score')
+    data = load_data()
+    req = request.get_json()
 
-    if name in users:
-        # עדכון שיא אישי לפי רמה
-        if score is not None and difficulty:
-            # וודא שקיים מילון שיאים, אם לא - צור אחד
-            if "best_scores" not in users[name]:
-                users[name]["best_scores"] = {"4x4": 999, "6x6": 999, "8x8": 999}
+    name = req.get('name')
+    difficulty = req.get('difficulty')
+    turns = req.get('turns')
+    time_taken = req.get('time')
+    mode = req.get('mode')
+    win = req.get('win')
 
-            current_best = users[name]["best_scores"].get(difficulty, 999)
-            if score < current_best:
-                users[name]["best_scores"][difficulty] = score
+    print(f"[UPDATE_STATS] Received: name={name}, diff={difficulty}, turns={turns}, time={time_taken}s, mode={mode}")
 
-        # עדכון ניצחונות במצב זוגי
-        if data.get('win'):
-            users[name]['wins'] = users[name].get('wins', 0) + 1
+    if name not in data['users']:
+        return jsonify({"message": "User not found"}), 404
 
-        save_data(users)
-        return jsonify({"status": "success"})
+    user = data['users'][name]
 
-    return jsonify({"status": "error", "message": "User not found"}), 404
+    # עדכון ניצחונות במצב זוגי
+    if mode == 'Multi' and win:
+        user['wins'] = user.get('wins', 0) + 1
+        print(f"[UPDATE_STATS] 🏆 Win added for {name}. Total wins: {user['wins']}")
+
+    # עדכון שיא אישי במצב שחקן יחיד
+    if mode == 'Single' and turns is not None and time_taken is not None:
+        # וידוא שקיים אובייקט best_scores
+        if "best_scores" not in user:
+            user["best_scores"] = {"4x4": None, "6x6": None, "8x8": None}
+
+        current_best = user['best_scores'].get(difficulty)
+
+        # לוגיקת החלטה: האם זה שיא חדש?
+        is_new_record = False
+
+        # 1. אם מעולם לא נקבע שיא
+        if current_best is None or current_best.get('turns') is None:
+            is_new_record = True
+        else:
+            old_turns = current_best.get('turns')
+            old_time = current_best.get('time', 9999)
+
+            # 2. אם כמות התורות קטנה יותר
+            if turns < old_turns:
+                is_new_record = True
+            # 3. אם כמות התורות שווה, אבל הזמן מהיר יותר
+            elif turns == old_turns and time_taken < old_time:
+                is_new_record = True
+            # 4. תיקון נתונים: אם קיים שיא אבל הזמן הוא 0
+            elif old_time == 0:
+                is_new_record = True
+
+        if is_new_record:
+            user['best_scores'][difficulty] = {
+                "turns": turns,
+                "time": time_taken
+            }
+            print(f"[UPDATE_STATS] ✅ NEW RECORD! {name} | {difficulty}: {turns} turns, {time_taken}s")
+        else:
+            print(f"[UPDATE_STATS] ⏭️ No improvement. Current best for {name}: {current_best.get('turns')} turns")
+
+    save_data(data)
+    return jsonify({"message": "Stats updated", "user": user}), 200
+
+
+@app.route('/get_game_data', methods=['GET'])
+def get_game_data():
+    data = load_data()
+    print(f"[GET_GAME_DATA] Sending {len(data['images'])} images to client")
+    return jsonify({
+        "images": data['images'],
+        "leaderboard": data['users']
+    })
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    images = get_image_list()
+    print(f"\n{'=' * 50}")
+    print(f"🎮 Memory Game Server Starting...")
+    print(f"📁 Images directory: {IMAGE_FOLDER}")
+    print(f"🖼️  Total images available: {len(images)}")
+    print(f"📊 User data file: {DATA_FILE}")
+    print(f"{'=' * 50}\n")
+
+    app.run(debug=True, port=5000)

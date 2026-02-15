@@ -82,11 +82,11 @@
         .yellow { background: #f1c40f; color: #2c3e50; }
 
         #board { display: grid; gap: 10px; justify-content: center; margin: 20px auto; }
-        .card {
+        .card { 
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            cursor: pointer;
-            border-radius: 8px;
-            border: 3px solid #2c3e50;
+            cursor: pointer; 
+            border-radius: 8px; 
+            border: 3px solid #2c3e50; 
             transition: all 0.3s ease;
             position: relative;
             overflow: hidden;
@@ -104,10 +104,10 @@
             opacity: 1;
             transition: opacity 0.3s ease;
         }
-        .card img {
-            width: 100%;
-            height: 100%;
-            border-radius: 6px;
+        .card img { 
+            width: 100%; 
+            height: 100%; 
+            border-radius: 6px; 
             object-fit: cover;
             opacity: 0;
             transition: opacity 0.3s ease;
@@ -115,15 +115,15 @@
         .card.flipped::before {
             opacity: 0;
         }
-        .card.flipped {
+        .card.flipped { 
             background: white;
         }
-        .card.flipped img {
+        .card.flipped img { 
             opacity: 1;
         }
-        .card.matched {
-            border: 3px solid #27ae60;
-            cursor: default;
+        .card.matched { 
+            border: 3px solid #27ae60; 
+            cursor: default; 
         }
         .card.matched::before {
             opacity: 0;
@@ -181,13 +181,6 @@
             currentPlayer: 1, scores: {1:0, 2:0},
             rows: 0, cols: 0, currentDifficulty: '',
             startTime: null, timerInterval: null
-        };
-
-        const audioFiles = {
-            flip: new Audio('/static/sounds/flip.wav'),
-            match: new Audio('/static/sounds/match.wav'),
-            complete: new Audio('/static/sounds/complete.wav'),
-            record: new Audio('/static/sounds/record.wav')
         };
 
         function toggleMulti() {
@@ -331,84 +324,89 @@
         }
 
         async function check() {
-    const [c1, c2] = game.flipped;
+            const [c1, c2] = game.flipped;
+            
+            console.log(`[CHECK] Checking match. Turns: ${game.turns}, Mode: ${game.mode}`); // Debug
+            
+            if (c1.img === c2.img) {
+                game.matches++;
+                playSound('match'); // ✅ Play match sound
+                if(game.mode === 'Multi') game.scores[game.currentPlayer]++;
+                c1.el.classList.add('matched');
+                c2.el.classList.add('matched');
 
-    // הגנה: אם אחד הכרטיסים חסר, אל תמשיך
-    if (!c1 || !c2) return;
+                if (game.matches === (game.rows * game.cols) / 2) {
+                    clearInterval(game.timerInterval);
+                    playSound('complete'); // ✅ Play complete sound
+                    document.getElementById('play-again-btn').classList.remove('hidden');
+                    document.getElementById('change-diff-btn').classList.remove('hidden');
 
-    if (c1.img === c2.img) {
-        // --- התאמה הצליחה ---
-        game.matches++;
-        if (game.mode === 'Multi') game.scores[game.currentPlayer]++;
+                    const diff = game.currentDifficulty;
+                    
+                    // ✅ FIX: Calculate time BEFORE checking for new record
+                    const totalTime = getCurrentTime();
+                    
+                    console.log(`Game finished! Turns: ${game.turns}, Time: ${totalTime}s`);
 
-        c1.el.classList.add('matched');
-        c2.el.classList.add('matched');
+                    // Check for new personal best in single player
+                    let isNewRecord = false;
+                    if (game.mode === 'Single') {
+                        const currentBest = game.p1.best_scores[diff];
+                        if (!currentBest || currentBest.turns === null || game.turns < currentBest.turns) {
+                            isNewRecord = true;
+                            game.p1.best_scores[diff] = { turns: game.turns, time: totalTime };
+                            playSound('record'); // ✅ Play record sound
+                            
+                            // Show animated alert
+                            setTimeout(() => {
+                                alert("🔥 שיא חדש!\n" + 
+                                      `${game.turns} תורות ב-${totalTime} שניות!`);
+                            }, 500);
+                        }
+                    }
 
-        // אם יש לך פונקציית סאונד, וודא שהיא קיימת לפני הקריאה:
-        if (typeof playSound === "function") playSound('match');
+                    // ✅ FIX: Send data to server with correct structure
+                    const payload = {
+                        name: game.p1.name,
+                        difficulty: diff,
+                        turns: game.turns,
+                        time: totalTime,
+                        mode: game.mode,  // ✅ Make sure mode is sent
+                        win: game.mode === 'Multi' ? (game.scores[1] > game.scores[2]) : null
+                    };
 
-        if (game.matches === (game.rows * game.cols) / 2) {
-            handleWin();
+                    console.log('=== SENDING TO SERVER ===');
+                    console.log('Payload:', JSON.stringify(payload, null, 2));
+                    console.log('Game State:', {
+                        mode: game.mode,
+                        turns: game.turns,
+                        totalTime: totalTime,
+                        p1: game.p1.name
+                    });
+                    console.log('========================');
+
+                    fetch('/update_stats', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    })
+                    .then(res => res.json())
+                    .then(data => {
+                        console.log("Server response:", data);
+                        if (data.message) {
+                            console.log(data.message);
+                        }
+                    })
+                    .catch(err => console.error("Error updating stats:", err));
+                }
+            } else {
+                c1.el.classList.remove('flipped');
+                c2.el.classList.remove('flipped');
+                if(game.mode === 'Multi') game.currentPlayer = game.currentPlayer === 1 ? 2 : 1;
+            }
+            game.flipped = [];
+            update();
         }
-    } else {
-        // --- אין התאמה ---
-        // מחכים קצת כדי שהשחקן יראה את הטעות
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-        // סוגרים את הקלפים
-        c1.el.classList.remove('flipped');
-        c2.el.classList.remove('flipped');
-
-        // החלפת תור במצב זוגי
-        if (game.mode === 'Multi') {
-            game.currentPlayer = game.currentPlayer === 1 ? 2 : 1;
-        }
-    }
-
-    // ניקוי המערך כדי לאפשר לחיצה על קלפים חדשים
-    game.flipped = [];
-    update();
-}
-
-// פונקציה עזר לטיפול בניצחון (כדי לשמור על הסדר)
-function handleWin() {
-    clearInterval(game.timerInterval);
-    document.getElementById('play-again-btn').classList.remove('hidden');
-    document.getElementById('change-diff-btn').classList.remove('hidden');
-
-    const diff = game.currentDifficulty;
-    const totalTime = getCurrentTime();
-
-    if (game.mode === 'Single') {
-        const currentBest = game.p1.best_scores[diff];
-        if (!currentBest || currentBest.turns === null || game.turns < currentBest.turns) {
-            game.p1.best_scores[diff] = { turns: game.turns, time: totalTime };
-            alert(`🔥 שיא חדש! ${game.turns} תורות!`);
-        }
-    }
-
-    // שליחה לשרת
-    fetch('/update_stats', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            name: game.p1.name,
-            difficulty: diff,
-            turns: game.turns,
-            time: totalTime,
-            mode: game.mode,
-            win: game.mode === 'Multi' ? (game.scores[1] > game.scores[2]) : null
-        })
-    });
-}
-
-function playSound(type) {
-    const sound = audioFiles[type];
-    if (sound) {
-        sound.currentTime = 0; // מאפס את הצליל כדי שיוכל להתנגן שוב מיד
-        sound.play().catch(e => console.log("Sound error:", e));
-    }
-}
 
         function update() {
             if (!game.p1) return;
@@ -431,29 +429,29 @@ function playSound(type) {
         async function loadLeaderboard() {
             const res = await fetch('/get_game_data');
             const data = await res.json();
-
+            
             const lbDiv = document.getElementById('leaderboard');
             lbDiv.innerHTML = '';
             lbDiv.style.display = 'block';
-
+            
             // Hide other screens
             document.getElementById('login-screen').classList.add('hidden');
             document.getElementById('difficulty-screen').classList.add('hidden');
             document.getElementById('game-screen').classList.add('hidden');
-
+            
             const container = document.createElement('div');
             container.className = 'container-glass';
             container.style.margin = '50px auto';
             container.style.maxWidth = '800px';
-
+            
             let html = '<h2>🏆 Leaderboard</h2>';
-
+            
             const difficulties = ["4x4", "6x6", "8x8"];
             difficulties.forEach(diff => {
                 html += `<h3>Level ${diff}</h3>`;
                 html += '<table style="width:100%; border-collapse:collapse; margin-bottom:20px;">';
                 html += '<tr style="background:rgba(0,0,0,0.3);"><th>#</th><th>Name</th><th>Turns</th><th>Time</th><th>Wins</th></tr>';
-
+                
                 const players = Object.entries(data.leaderboard)
                     .map(([name, info]) => {
                         const score = info.best_scores?.[diff];
@@ -467,7 +465,7 @@ function playSound(type) {
                     .filter(p => p.turns !== null)
                     .sort((a,b) => a.turns - b.turns)
                     .slice(0, 10);
-
+                
                 if (players.length === 0) {
                     html += '<tr><td colspan="5" style="text-align:center; padding:10px;">No scores yet</td></tr>';
                 } else {
@@ -481,12 +479,12 @@ function playSound(type) {
                         html += '</tr>';
                     });
                 }
-
+                
                 html += '</table>';
             });
-
+            
             html += '<button class="btn blue" onclick="backToLogin()">Back to Login</button>';
-
+            
             container.innerHTML = html;
             lbDiv.appendChild(container);
         }
@@ -498,90 +496,76 @@ function playSound(type) {
         }
 
         async function initGame(r, c) {
-    // איפוס מוחלט של מצב המשחק
-    game.rows = r; game.cols = c;
-    game.turns = 0; game.matches = 0;
-    game.flipped = []; // חשוב מאוד לאפס את זה כאן!
-    game.scores = {1:0, 2:0};
-    game.currentPlayer = 1;
-    game.startTime = Date.now();
-    game.currentDifficulty = `${r}x${c}`;
-
-    const res = await fetch('/get_game_data');
-    const data = await res.json();
-    const board = document.getElementById('board');
-
-    let size = Math.min((window.innerWidth * 0.8) / c, (window.innerHeight * 0.6) / r, 90);
-    board.style.gridTemplateColumns = `repeat(${c}, ${size}px)`;
-
-    let numPairs = (r * c) / 2;
-    let deck = [...data.images.slice(0, numPairs), ...data.images.slice(0, numPairs)]
-               .sort(() => 0.5 - Math.random());
-
-    board.innerHTML = '';
-    deck.forEach(img => {
-        const card = document.createElement('div');
-        card.className = 'card';
-        card.style.width = size + 'px';
-        card.style.height = size + 'px';
-        card.innerHTML = `<img src="/static/game_images/${img}">`;
-
-        card.onclick = () => {
-            // הגנה: מותר ללחוץ רק אם פחות מ-2 קלפים פתוחים והקלף לא פתוח כבר
-            if (game.flipped.length < 2 && !card.classList.contains('flipped') && !card.classList.contains('matched')) {
-                card.classList.add('flipped');
-                playSound('flip'); // ✅ הוספת צליל הפיכה
-                game.flipped.push({el: card, img: img});
-
-                if (game.flipped.length === 2) {
-                    game.turns++;
-                    // משתמשים ב-setTimeout כדי שהשחקן יראה את הקלף השני נפתח
-                    setTimeout(checkCards, 800);
-                }
-                update();
+            // ✅ Ensure mode is set correctly
+            if (!game.mode) {
+                game.mode = 'Single';
             }
-        };
-        board.appendChild(card);
-    });
+            
+            game.rows = r; game.cols = c;
+            game.turns = 0; game.matches = 0;
+            game.flipped = [];
+            game.scores = {1:0, 2:0};
+            game.currentPlayer = 1;
+            game.startTime = Date.now();  // ✅ Start timer
+            game.currentDifficulty = `${r}x${c}`;
+            
+            console.log(`[INIT] Starting game: ${r}x${c}, Mode: ${game.mode}`); // Debug log
 
-    document.getElementById('difficulty-screen').classList.add('hidden');
-    document.getElementById('game-screen').classList.remove('hidden');
-    document.getElementById('status-bar').classList.remove('hidden');
+            const data = await (await fetch('/get_game_data')).json();
+            const board = document.getElementById('board');
+            
+            console.log('[INIT] Images received:', data.images.length);
+            console.log('[INIT] First 5 images:', data.images.slice(0, 5));
 
-    if (game.timerInterval) clearInterval(game.timerInterval);
-    game.timerInterval = setInterval(update, 1000);
-    update();
-}
+            let size = Math.min((window.innerWidth * 0.8) / c, (window.innerHeight * 0.6) / r, 90);
+            board.style.gridTemplateColumns = `repeat(${c}, ${size}px)`;
 
-function checkCards() {
-    // מוודא שיש בדיוק 2 קלפים לבדיקה
-    if (game.flipped.length !== 2) return;
+            let numPairs = (r * c) / 2;
+            let deck = [...data.images.slice(0, numPairs), ...data.images.slice(0, numPairs)].sort(() => 0.5 - Math.random());
 
-    const [c1, c2] = game.flipped;
+            board.innerHTML = '';
+            deck.forEach(img => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.style.width = size + 'px'; 
+                card.style.height = size + 'px';
+                
+                // Create image element
+                const imgEl = document.createElement('img');
+                imgEl.src = `/static/game_images/${img}`;
+                imgEl.alt = 'Card';
+                imgEl.onerror = function() {
+                    console.error('Failed to load image:', img);
+                    this.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect fill="%23e74c3c" width="100" height="100"/><text x="50" y="50" text-anchor="middle" fill="white" font-size="40">?</text></svg>';
+                };
+                card.appendChild(imgEl);
+                
+                card.onclick = () => {
+                    if (game.flipped.length < 2 && !card.classList.contains('flipped') && !card.classList.contains('matched')) {
+                        console.log('[CLICK] Flipping card with image:', img);
+                        card.classList.add('flipped');
+                        playSound('flip'); // ✅ Play flip sound
+                        game.flipped.push({el: card, img: img});
+                        if (game.flipped.length === 2) {
+                            game.turns++;
+                            setTimeout(check, 1000);
+                        }
+                        update();
+                    }
+                };
+                board.appendChild(card);
+            });
 
-    if (c1.img === c2.img) {
-        // התאמה!
-        c1.el.classList.add('matched');
-        c2.el.classList.add('matched');
-        game.matches++;
-        playSound('match'); // ✅ הוספת צליל הצלחה
+            document.getElementById('difficulty-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            document.getElementById('status-bar').classList.remove('hidden');
+            document.getElementById('play-again-btn').classList.add('hidden');
+            document.getElementById('change-diff-btn').classList.add('hidden');
 
-        if(game.mode === 'Multi') game.scores[game.currentPlayer]++;
-
-        if (game.matches === (game.rows * game.cols) / 2) {
-            handleWin();
+            if (game.timerInterval) clearInterval(game.timerInterval);
+            game.timerInterval = setInterval(update, 1000);
+            update();
         }
-    } else {
-        // אין התאמה - לסגור
-        c1.el.classList.remove('flipped');
-        c2.el.classList.remove('flipped');
-        if(game.mode === 'Multi') game.currentPlayer = game.currentPlayer === 1 ? 2 : 1;
-    }
-
-    // איפוס המערך חייב לקרות כאן כדי לאפשר לחיצות חדשות
-    game.flipped = [];
-    update();
-}
     </script>
 </body>
 </html>
