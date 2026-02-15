@@ -1,0 +1,14 @@
+once a month get in
+https://www.pythonanywhere.com/user/ramicarmy/webapps/#tab_id_ramicarmy_pythonanywhere_com
+toRun:
+https://ramicarmy.pythonanywhere.com/
+מה בדיוק עליך לעשות פעם בחודש?
+להיכנס לחשבון שלך: היכנס לאתר PythonAnywhere.
+
+ללכת ללשונית ה-Web: לחץ על כפתור התפריט (הקווים למעלה) ובחר ב-Web.
+
+ללחוץ על כפתור ההארכה: חפש את הכפתור הצהוב הגדול שכתוב عليه:
+
+"Run until 3 months from today" (או חודש, תלוי בעדכונים שלהם).
+
+לחיצה על Reload: ליתר ביטחון, אחרי שהארכת, מומלץ ללחוץ גם על הכפתור הירוק Reload.

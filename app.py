@@ -42,7 +42,10 @@ def login():
         if users[name]["password"] == password:
             return jsonify({
                 "status": "ok",
-                "user": {"name": name}  # אל תחזיר best_score כאן – זה כבר ב-get_game_data
+                "user": {
+                    "name": name,
+                    "best_scores": users[name].get("best_scores", {"4x4": 999, "6x6": 999, "8x8": 999})
+                }
             })
         else:
             return jsonify({"message": "סיסמה שגויה"}), 401
@@ -50,7 +53,7 @@ def login():
         # הרשמה
         users[name] = {
             "password": password,
-            "best_score": 999,
+            "best_scores": {"4x4": 999, "6x6": 999, "8x8": 999}, # שיאים נפרדים
             "wins": 0
         }
         save_data(users)
@@ -65,11 +68,11 @@ def get_game_data():
     images = [f.name for f in IMAGE_FOLDER.iterdir() if f.suffix.lower() in ('.png', '.jpg', '.jpeg')]
     users = load_data()
 
-    # יצירת לוח הישגים נקי – רק שם + best_score + wins (אם קיים)
     leaderboard = {}
     for name, info in users.items():
+        # אנחנו שולחים את כל המילון כפי שהוא
         leaderboard[name] = {
-            "best_score": info.get("best_score", 999),
+            "best_scores": info.get("best_scores", {"4x4": 999, "6x6": 999, "8x8": 999}),
             "wins": info.get("wins", 0)
         }
 
@@ -78,20 +81,34 @@ def get_game_data():
         "leaderboard": leaderboard
     })
 
+
 @app.route('/update_stats', methods=['POST'])
 def update_stats():
     data = request.json
     users = load_data()
     name = data.get('name')
-    if name in users:
-        if 'score' in data:  # שיא אישי
-            if data['score'] < users[name]['best_score']:
-                users[name]['best_score'] = data['score']
-        if 'win' in data:  # ניצחון במולטי
-            users[name]['wins'] += 1
-        save_data(users)
-    return jsonify({"status": "success"})
+    difficulty = data.get('difficulty')  # ה-JS ישלח למשל "4x4"
+    score = data.get('score')
 
+    if name in users:
+        # עדכון שיא אישי לפי רמה
+        if score is not None and difficulty:
+            # וודא שקיים מילון שיאים, אם לא - צור אחד
+            if "best_scores" not in users[name]:
+                users[name]["best_scores"] = {"4x4": 999, "6x6": 999, "8x8": 999}
+
+            current_best = users[name]["best_scores"].get(difficulty, 999)
+            if score < current_best:
+                users[name]["best_scores"][difficulty] = score
+
+        # עדכון ניצחונות במצב זוגי
+        if data.get('win'):
+            users[name]['wins'] = users[name].get('wins', 0) + 1
+
+        save_data(users)
+        return jsonify({"status": "success"})
+
+    return jsonify({"status": "error", "message": "User not found"}), 404
 
 if __name__ == '__main__':
     app.run(debug=True)

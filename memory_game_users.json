@@ -2,11 +2,21 @@
     "rami": {
         "password": "carmy",
         "best_score": 12,
-        "wins": 5
+        "wins": 14,
+        "best_scores": {
+            "4x4": 16,
+            "6x6": 999,
+            "8x8": 999
+        }
     },
     "eti": {
         "password": "carmy",
         "best_score": 13,
+        "wins": 1
+    },
+    "רמי": {
+        "password": "כרמי",
+        "best_score": 19,
         "wins": 1
     }
 }
